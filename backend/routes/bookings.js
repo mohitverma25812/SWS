@@ -69,16 +69,27 @@ router.post('/create', async (req, res) => {
     }
 });
 
-// 2. VERIFY OTP (Ongoing status update)
+// ✅ 2. VERIFY OTP (Updated: Paisa Wallet mein add karne ke liye)
 router.post('/verify-otp', async (req, res) => {
     try {
         const { bookingId, otp } = req.body;
         const booking = await Booking.findById(bookingId);
         
         if (booking && booking.otp === otp) {
-            booking.status = 'ongoing'; 
+            booking.status = 'ongoing'; // Kaam shuru
             await booking.save();
-            return res.json({ success: true, message: "OTP Verified! Work Started." });
+
+            // 💰 Jab OTP verify ho jaye, tabhi worker ke wallet mein balance add karo
+            const worker = await Worker.findById(booking.worker);
+            if (worker) {
+                worker.walletBalance = (worker.walletBalance || 0) + (booking.price || 199);
+                await worker.save();
+            }
+
+            return res.json({ 
+                success: true, 
+                message: "OTP Verified! ₹" + (booking.price || 199) + " added to your wallet." 
+            });
         }
         res.status(400).json({ success: false, message: "Invalid OTP" });
     } catch (err) {
@@ -145,11 +156,42 @@ router.get('/worker-earnings/:workerId', async (req, res) => {
     }
 });
 
-// 🔥 5. GET ALL REVIEWS FOR A WORKER (Naya Feature Yahan Hai)
+// 🔥 5. NAYA ROUTE: UPI ID Update karne ke liye
+router.put('/update-upi/:workerId', async (req, res) => {
+    try {
+        const { upiId } = req.body;
+        await Worker.findByIdAndUpdate(req.params.workerId, { upiId: upiId });
+        res.json({ success: true, message: "UPI ID Updated Successfully!" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 🔥 6. NAYA ROUTE: Withdrawal Request bhejne ke liye
+router.post('/withdraw-request', async (req, res) => {
+    try {
+        const { workerId, amount } = req.body;
+        const worker = await Worker.findById(workerId);
+
+        if (!worker || worker.walletBalance < amount) {
+            return res.status(400).json({ success: false, message: "Balance kam hai bhai!" });
+        }
+
+        // Wallet se balance kato aur request list mein dalo
+        worker.walletBalance -= amount;
+        worker.withdrawals.push({ amount: amount, status: 'pending' });
+        
+        await worker.save();
+        res.json({ success: true, message: "Withdrawal request sent! Admin verify karega." });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 7. GET ALL REVIEWS FOR A WORKER
 router.get('/worker-reviews/:workerId', async (req, res) => {
     try {
         const { workerId } = req.params;
-
         const reviews = await Booking.find({ 
             worker: workerId, 
             status: 'completed',
@@ -164,7 +206,7 @@ router.get('/worker-reviews/:workerId', async (req, res) => {
     }
 });
 
-// 6. GET USER BOOKINGS
+// 8. GET USER BOOKINGS
 router.get('/my-bookings/:userId', async (req, res) => {
     try {
         const bookings = await Booking.find({ user: req.params.userId })
@@ -176,7 +218,7 @@ router.get('/my-bookings/:userId', async (req, res) => {
     }
 });
 
-// 7. GET WORKER REQUESTS
+// 9. GET WORKER REQUESTS
 router.get('/worker-requests/:workerId', async (req, res) => {
     try {
         const bookings = await Booking.find({ 
@@ -191,14 +233,13 @@ router.get('/worker-requests/:workerId', async (req, res) => {
     }
 });
 
-// 8. SUBMIT RATING (Updated to save rating inside Booking too)
+// 10. SUBMIT RATING
 router.post('/rate-worker', async (req, res) => {
     try {
         const { workerId, userId, rating, comment, bookingId } = req.body;
         const worker = await Worker.findById(workerId);
         if (!worker) return res.status(404).json({ message: "Worker nahi mila" });
 
-        // Worker collection mein review add karna (Puraana logic)
         worker.reviews.push({ user: userId, rating, comment });
         const currentTotal = (worker.averageRating || 0) * (worker.totalRatings || 0);
         worker.totalRatings = (worker.totalRatings || 0) + 1;
@@ -206,7 +247,6 @@ router.post('/rate-worker', async (req, res) => {
 
         await worker.save();
 
-        // 🔥 Booking collection mein bhi rating/comment update karna (Naya logic for reviews screen)
         await Booking.findByIdAndUpdate(bookingId, { 
             status: 'completed',
             rating: rating,
