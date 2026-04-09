@@ -14,7 +14,7 @@ const workerSchema = new mongoose.Schema({
         coordinates: { type: [Number], index: "2dsphere" } 
     },
     
-    // ⭐ RATING SYSTEM FIELDS
+    //  RATING SYSTEM FIELDS
     totalRatings: { 
         type: Number, 
         default: 0 
@@ -29,6 +29,30 @@ const workerSchema = new mongoose.Schema({
             rating: { type: Number, required: true },
             comment: { type: String, default: "" },
             createdAt: { type: Date, default: Date.now }
+        }
+    ],
+
+    //  WALLET & WITHDRAWAL SYSTEM (New Feature)
+    walletBalance: { 
+        type: Number, 
+        default: 0 
+    },
+    upiId: { 
+        type: String, 
+        default: "" 
+    },
+    withdrawals: [
+        {
+            amount: Number,
+            status: { 
+                type: String, 
+                enum: ['pending', 'success', 'rejected'], 
+                default: 'pending' 
+            },
+            date: { 
+                type: Date, 
+                default: Date.now 
+            }
         }
     ]
 });
