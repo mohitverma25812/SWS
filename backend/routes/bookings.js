@@ -259,4 +259,19 @@ router.post('/rate-worker', async (req, res) => {
     }
 });
 
+// ... baaki puraane routes yahan honge ...
+
+// 🚀 UPDATE: Worker ki puri history (All statuses)
+router.get('/worker-history/:workerId', async (req, res) => {
+    try {
+        const { workerId } = req.params;
+        const bookings = await Booking.find({ worker: workerId })
+            .populate('user', 'name phone email') 
+            .sort({ createdAt: -1 });
+        res.json(bookings);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;
