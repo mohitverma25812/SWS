@@ -273,5 +273,54 @@ router.get('/worker-history/:workerId', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// 🏦 ADMIN: Saari pending withdrawal requests dekhna
+router.get('/admin/withdrawals', async (req, res) => {
+    try {
+        const workers = await Worker.find({ "withdrawals.status": "pending" }, { name: 1, upiId: 1, withdrawals: 1 });
+        
+        // Sirf pending requests ko filter karke bhejna
+        let pendingRequests = [];
+        workers.forEach(worker => {
+            worker.withdrawals.forEach(req => {
+                if(req.status === 'pending') {
+                    pendingRequests.push({
+                        workerId: worker._id,
+                        workerName: worker.name,
+                        upiId: worker.upiId,
+                        requestId: req._id,
+                        amount: req.amount,
+                        date: req.date
+                    });
+                }
+            });
+        });
+        res.json(pendingRequests);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ✅ ADMIN: Withdrawal request ko Approve/Reject karna
+router.put('/admin/withdraw-action', async (req, res) => {
+    try {
+        const { workerId, requestId, action } = req.body; // action: 'success' ya 'rejected'
+        const worker = await Worker.findById(workerId);
+
+        const withdrawal = worker.withdrawals.id(requestId);
+        if (!withdrawal) return res.status(404).json({ message: "Request nahi mili" });
+
+        withdrawal.status = action;
+
+        // Agar reject hua toh paisa wapas wallet mein dalo
+        if (action === 'rejected') {
+            worker.walletBalance += withdrawal.amount;
+        }
+
+        await worker.save();
+        res.json({ success: true, message: `Request ${action} ho gayi!` });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 module.exports = router;
