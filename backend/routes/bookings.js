@@ -13,7 +13,6 @@ router.post('/create', async (req, res) => {
             return res.status(400).json({ message: "User ID aur Worker ID zaroori hai" });
         }
 
-        // Location string parsing (Jaisa pehle tha)
         if (location && typeof location === 'string' && location.includes('|')) {
             const parts = location.split('|');
             latitude = parseFloat(parts[0]);
@@ -21,7 +20,6 @@ router.post('/create', async (req, res) => {
             location = parts[2] || "Live Location";
         }
 
-        // 💡 4-digit OTP Generate karna
         const generatedOtp = Math.floor(1000 + Math.random() * 9000).toString();
 
         const newBooking = new Booking({
@@ -37,7 +35,6 @@ router.post('/create', async (req, res) => {
 
         await newBooking.save();
 
-        // 🔔 Worker ko Notification bhejna (OTP Body mein add kar diya)
         const targetWorker = await Worker.findById(worker);
         if (targetWorker && targetWorker.fcmToken) {
             const firebaseAdmin = req.app.get('firebaseAdmin'); 
@@ -45,7 +42,6 @@ router.post('/create', async (req, res) => {
                 const message = {
                     notification: {
                         title: 'New Booking Request! 🛠️',
-                        // 🔥 FIX: Body mein OTP add kar diya taaki worker ko notification mein hi dikh jaye
                         body: `Nayi job request! OTP: ${generatedOtp}. Customer se verify karein.`,
                     },
                     token: targetWorker.fcmToken,
@@ -134,7 +130,7 @@ router.put('/update-status/:bookingId', async (req, res) => {
     }
 });
 
-// 4. GET WORKER EARNINGS (Earnings logic)
+// 4. GET WORKER EARNINGS
 router.get('/worker-earnings/:workerId', async (req, res) => {
     try {
         const completedJobs = await Booking.find({ 
@@ -149,7 +145,26 @@ router.get('/worker-earnings/:workerId', async (req, res) => {
     }
 });
 
-// 5. GET USER BOOKINGS
+// 🔥 5. GET ALL REVIEWS FOR A WORKER (Naya Feature Yahan Hai)
+router.get('/worker-reviews/:workerId', async (req, res) => {
+    try {
+        const { workerId } = req.params;
+
+        const reviews = await Booking.find({ 
+            worker: workerId, 
+            status: 'completed',
+            rating: { $gt: 0 } 
+        })
+        .populate('user', 'name') 
+        .sort({ createdAt: -1 }); 
+
+        res.status(200).json(reviews);
+    } catch (error) {
+        res.status(500).json({ message: "Server Error", error });
+    }
+});
+
+// 6. GET USER BOOKINGS
 router.get('/my-bookings/:userId', async (req, res) => {
     try {
         const bookings = await Booking.find({ user: req.params.userId })
@@ -161,7 +176,7 @@ router.get('/my-bookings/:userId', async (req, res) => {
     }
 });
 
-// 6. GET WORKER REQUESTS
+// 7. GET WORKER REQUESTS
 router.get('/worker-requests/:workerId', async (req, res) => {
     try {
         const bookings = await Booking.find({ 
@@ -176,20 +191,27 @@ router.get('/worker-requests/:workerId', async (req, res) => {
     }
 });
 
-// 7. SUBMIT RATING
+// 8. SUBMIT RATING (Updated to save rating inside Booking too)
 router.post('/rate-worker', async (req, res) => {
     try {
         const { workerId, userId, rating, comment, bookingId } = req.body;
         const worker = await Worker.findById(workerId);
         if (!worker) return res.status(404).json({ message: "Worker nahi mila" });
 
+        // Worker collection mein review add karna (Puraana logic)
         worker.reviews.push({ user: userId, rating, comment });
-        const currentTotal = worker.averageRating * worker.totalRatings;
-        worker.totalRatings += 1;
+        const currentTotal = (worker.averageRating || 0) * (worker.totalRatings || 0);
+        worker.totalRatings = (worker.totalRatings || 0) + 1;
         worker.averageRating = (currentTotal + rating) / worker.totalRatings;
 
         await worker.save();
-        await Booking.findByIdAndUpdate(bookingId, { status: 'completed' });
+
+        // 🔥 Booking collection mein bhi rating/comment update karna (Naya logic for reviews screen)
+        await Booking.findByIdAndUpdate(bookingId, { 
+            status: 'completed',
+            rating: rating,
+            comment: comment
+        });
 
         res.status(200).json({ success: true, message: "Rating submitted!" });
     } catch (err) {

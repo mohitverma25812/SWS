@@ -27,16 +27,24 @@ const BookingSchema = new mongoose.Schema({
         type: Number, 
         default: 199 
     },
-    // 🔥 NAYA BADLAV: OTP field add kar di
+    // 🔥 OTP field verification ke liye
     otp: { 
         type: String,
         required: false 
     },
     status: { 
         type: String, 
-        // 💡 status mein 'ongoing' bhi dalo taaki OTP verify hone par update ho sake
         enum: ['pending', 'accepted', 'rejected', 'ongoing', 'completed'], 
         default: 'pending' 
+    },
+    // ⭐ NAYA BADLAV: Rating aur Comment fields
+    rating: { 
+        type: Number, 
+        default: 0 
+    },
+    comment: { 
+        type: String, 
+        default: "" 
     },
     createdAt: { 
         type: Date, 
