@@ -156,7 +156,7 @@ router.get('/worker-earnings/:workerId', async (req, res) => {
     }
 });
 
-// 🔥 5. NAYA ROUTE: UPI ID Update karne ke liye
+// 🔥 5. UPI ID Update karne ke liye
 router.put('/update-upi/:workerId', async (req, res) => {
     try {
         const { upiId } = req.body;
@@ -167,13 +167,13 @@ router.put('/update-upi/:workerId', async (req, res) => {
     }
 });
 
-// 🔥 6. NAYA ROUTE: Withdrawal Request bhejne ke liye
+// 🔥 6. Withdrawal Request bhejne ke liye
 router.post('/withdraw-request', async (req, res) => {
     try {
         const { workerId, amount } = req.body;
         const worker = await Worker.findById(workerId);
 
-        if (!worker || worker.walletBalance < amount) {
+        if (!worker || (worker.walletBalance || 0) < amount) {
             return res.status(400).json({ success: false, message: "Balance kam hai bhai!" });
         }
 
@@ -223,7 +223,7 @@ router.get('/worker-requests/:workerId', async (req, res) => {
     try {
         const bookings = await Booking.find({ 
             worker: req.params.workerId, 
-            status: 'pending'          
+            status: 'pending'           
         })
         .populate('user', 'name phone email') 
         .sort({ createdAt: -1 });
@@ -259,9 +259,7 @@ router.post('/rate-worker', async (req, res) => {
     }
 });
 
-// ... baaki puraane routes yahan honge ...
-
-// 🚀 UPDATE: Worker ki puri history (All statuses)
+// 11. GET WORKER HISTORY
 router.get('/worker-history/:workerId', async (req, res) => {
     try {
         const { workerId } = req.params;
@@ -273,51 +271,57 @@ router.get('/worker-history/:workerId', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-// 🏦 ADMIN: Saari pending withdrawal requests dekhna
+
+// 🏦 12. ADMIN: Saari pending withdrawal requests dekhna
 router.get('/admin/withdrawals', async (req, res) => {
     try {
-        const workers = await Worker.find({ "withdrawals.status": "pending" }, { name: 1, upiId: 1, withdrawals: 1 });
+        // Un saare workers ko dhundho jinki koi request 'pending' hai
+        const workers = await Worker.find({ "withdrawals.status": "pending" }, 'name upiId withdrawals');
         
-        // Sirf pending requests ko filter karke bhejna
         let pendingRequests = [];
         workers.forEach(worker => {
-            worker.withdrawals.forEach(req => {
-                if(req.status === 'pending') {
+            worker.withdrawals.forEach(reqst => {
+                if (reqst.status === 'pending') {
                     pendingRequests.push({
+                        requestId: reqst._id,
                         workerId: worker._id,
                         workerName: worker.name,
                         upiId: worker.upiId,
-                        requestId: req._id,
-                        amount: req.amount,
-                        date: req.date
+                        amount: reqst.amount,
+                        date: reqst.date
                     });
                 }
             });
         });
-        res.json(pendingRequests);
+        res.status(200).json(pendingRequests);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// ✅ ADMIN: Withdrawal request ko Approve/Reject karna
+// ✅ 13. ADMIN: Withdrawal request ko Approve/Reject karna
 router.put('/admin/withdraw-action', async (req, res) => {
     try {
-        const { workerId, requestId, action } = req.body; // action: 'success' ya 'rejected'
+        const { workerId, requestId, action } = req.body; // action: 'success' or 'rejected'
+
         const worker = await Worker.findById(workerId);
+        if (!worker) return res.status(404).json({ message: "Worker not found" });
 
-        const withdrawal = worker.withdrawals.id(requestId);
-        if (!withdrawal) return res.status(404).json({ message: "Request nahi mili" });
+        const request = worker.withdrawals.id(requestId);
+        if (!request) return res.status(404).json({ message: "Request not found" });
 
-        withdrawal.status = action;
-
-        // Agar reject hua toh paisa wapas wallet mein dalo
-        if (action === 'rejected') {
-            worker.walletBalance += withdrawal.amount;
+        // Action logic
+        if (action === 'success') {
+            request.status = 'success';
+            // Balance already request bhejte waqt minus ho chuka hai (Route #6)
+        } else if (action === 'rejected') {
+            // Agar reject hua toh paisa wapas wallet mein dalo
+            worker.walletBalance += request.amount;
+            request.status = 'rejected';
         }
 
         await worker.save();
-        res.json({ success: true, message: `Request ${action} ho gayi!` });
+        res.status(200).json({ success: true, message: `Withdrawal ${action} successfully` });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

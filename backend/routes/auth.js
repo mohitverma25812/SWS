@@ -174,7 +174,4 @@ router.post('/worker/update-location', async (req, res) => {
     }
 });
 
-// ⚠️ Ye line humesha file ke aakhir mein honi chahiye
-module.exports = router;
-
 module.exports = router;
