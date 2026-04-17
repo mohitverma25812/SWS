@@ -44,7 +44,7 @@ router.post('/register/worker', async (req, res) => {
     }
 });
 
-// 3. LOGIN API (Sahi userData structure ke saath)
+// 3. LOGIN API
 router.post('/login', async (req, res) => {
     try {
         const { email, password, role } = req.body;
@@ -73,31 +73,14 @@ router.post('/login', async (req, res) => {
     }
 });
 
-// 🔔 4. UPDATE FCM TOKEN (The Core Fix for Notifications)
+// 🔔 4. UPDATE FCM TOKEN
 router.put('/update-fcm-token/:id', async (req, res) => {
     try {
         const { fcmToken, role } = req.body;
-        console.log(`📡 Request received to update token for ${role}: ${req.params.id}`);
-
-        if (!fcmToken) {
-            return res.status(400).json({ success: false, message: "Token is empty" });
-        }
-
-        let updatedUser;
-        if (role === 'worker') {
-            updatedUser = await Worker.findByIdAndUpdate(req.params.id, { fcmToken: fcmToken }, { new: true });
-        } else {
-            updatedUser = await User.findByIdAndUpdate(req.params.id, { fcmToken: fcmToken }, { new: true });
-        }
-
-        if (updatedUser) {
-            console.log(`✅ Token successfully saved in DB for ${role}`);
-            res.status(200).json({ success: true, message: "FCM Token Updated Successfully" });
-        } else {
-            res.status(404).json({ success: false, message: "User/Worker not found" });
-        }
+        const Model = role === 'worker' ? Worker : User;
+        await Model.findByIdAndUpdate(req.params.id, { fcmToken });
+        res.status(200).json({ success: true, message: "FCM Token Updated" });
     } catch (err) {
-        console.error("❌ DB Update Error:", err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -119,7 +102,7 @@ router.get('/workers', async (req, res) => {
     }
 });
 
-// 6. UPDATE WORKER LOCATION
+// 6. UPDATE WORKER LOCATION (Existing PUT method)
 router.put('/update-location/:id', async (req, res) => {
     try {
         const { latitude, longitude } = req.body;
@@ -132,7 +115,30 @@ router.put('/update-location/:id', async (req, res) => {
     }
 });
 
-// 7. UPDATE AVAILABILITY
+// ✅ 7. NEW: WORKER LIVE LOCATION UPDATE (POST method for Flutter LocationService)
+router.post('/worker/update-location', async (req, res) => {
+    try {
+        const { workerId, lat, lng } = req.body;
+        
+        if (!workerId) return res.status(400).json({ message: "Worker ID is required" });
+
+        await Worker.findByIdAndUpdate(workerId, {
+            location: {
+                type: "Point",
+                coordinates: [lng, lat] // MongoDB expects [Longitude, Latitude]
+            },
+            lastLocationUpdate: new Date()
+        });
+
+        console.log(`📍 Live Location Sync: Worker ${workerId} at ${lat}, ${lng}`);
+        res.status(200).json({ success: true, message: "Live Location Synced" });
+    } catch (err) {
+        console.error("❌ Location Sync Error:", err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 8. UPDATE AVAILABILITY
 router.put('/update-availability/:id', async (req, res) => {
     try {
         const { isAvailable } = req.body;
@@ -142,12 +148,33 @@ router.put('/update-availability/:id', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-// Sirf ye ek naya rasta (route) add kar lo purani file mein
-router.put('/update-fcm-token/:id', async (req, res) => {
-    const { fcmToken, role } = req.body;
-    const Model = role === 'worker' ? Worker : User;
-    await Model.findByIdAndUpdate(req.params.id, { fcmToken });
-    res.json({ success: true });
+
+// ... baaki saare purane routes (login, register etc.)
+
+// ✅ Yahan paste karein (module.exports se upar)
+router.post('/worker/update-location', async (req, res) => {
+    try {
+        const { workerId, lat, lng } = req.body;
+        
+        if (!workerId) return res.status(400).json({ message: "Worker ID is required" });
+
+        await Worker.findByIdAndUpdate(workerId, {
+            location: {
+                type: "Point",
+                coordinates: [lng, lat] // [Longitude, Latitude]
+            },
+            lastLocationUpdate: new Date()
+        });
+
+        console.log(`📍 Live Sync: Worker ${workerId} at ${lat}, ${lng}`);
+        res.status(200).json({ success: true, message: "Live Location Synced" });
+    } catch (err) {
+        console.error("❌ Sync Error:", err.message);
+        res.status(500).json({ error: err.message });
+    }
 });
+
+// ⚠️ Ye line humesha file ke aakhir mein honi chahiye
+module.exports = router;
 
 module.exports = router;

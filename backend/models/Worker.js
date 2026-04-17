@@ -13,8 +13,14 @@ const workerSchema = new mongoose.Schema({
         type: { type: String, default: "Point" },
         coordinates: { type: [Number], index: "2dsphere" } 
     },
-    
-    //  RATING SYSTEM FIELDS
+
+    // ✅ LIVE TRACKING FIELD (Naya add kiya)
+    lastLocationUpdate: { 
+        type: Date, 
+        default: Date.now 
+    },
+
+    // ⭐ RATING SYSTEM FIELDS
     totalRatings: { 
         type: Number, 
         default: 0 
@@ -32,7 +38,7 @@ const workerSchema = new mongoose.Schema({
         }
     ],
 
-    //  WALLET & WITHDRAWAL SYSTEM (New Feature)
+    // 💰 WALLET & WITHDRAWAL SYSTEM
     walletBalance: { 
         type: Number, 
         default: 0 
