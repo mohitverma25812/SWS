@@ -66,40 +66,43 @@ router.post('/create', async (req, res) => {
     }
 });
 
-// ✅ ACCEPT BOOKING API (Worker jab "ACCEPT" dabaye)
+// ✅ Correct Route for Acceptance
 router.post('/accept-booking', async (req, res) => {
     try {
         const { bookingId, workerId, serviceType } = req.body;
+        console.log("📩 Accept Request Received for:", bookingId);
+
         const booking = await Booking.findById(bookingId);
-
         if (!booking) {
-            return res.status(404).json({ success: false, message: "Booking not found" });
+            return res.status(404).json({ success: false, message: "Booking nahi mili!" });
         }
 
-        // 1. Check agar pehle hi kisi ne accept kar liya ho
         if (booking.status !== 'pending' || booking.worker !== null) {
-            return res.status(400).json({ success: false, message: "Too late! Already accepted by another worker." });
+            return res.status(400).json({ success: false, message: "Pehle hi kisi ne accept kar liya hai." });
         }
 
-        // 2. Worker assign karo aur status badlo
         booking.worker = workerId;
         booking.status = 'accepted';
         await booking.save();
 
-        // 🚀 SOCKET UPDATE: Baaki saare workers ki screen se request hatao
         const io = req.app.get('socketio');
         if (io) {
-            io.to(serviceType || booking.serviceType).emit("remove_booking_request", { 
-                bookingId: booking._id 
+            // Baaki workers ki screen se request hatane ke liye
+            io.to(serviceType || booking.serviceType).emit("remove_booking_request", { bookingId: booking._id });
+            
+            // User ko batane ke liye ki worker mil gaya hai (Custom User Room)
+            io.emit(`booking_accepted_${booking.user}`, { 
+                message: "Worker is on the way!",
+                booking 
             });
         }
 
-        res.status(200).json({ success: true, message: "Job assigned to you!", booking });
+        res.status(200).json({ success: true, message: "Job assigned successfully", booking });
     } catch (error) {
+        console.error("❌ Accept Error:", error);
         res.status(500).json({ success: false, message: error.message });
     }
 });
-
 // ✅ VERIFY OTP
 router.post('/verify-otp', async (req, res) => {
     try {
