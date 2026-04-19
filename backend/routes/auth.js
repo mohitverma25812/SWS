@@ -149,28 +149,32 @@ router.put('/update-availability/:id', async (req, res) => {
     }
 });
 
-// ... baaki saare purane routes (login, register etc.)
 
-// ✅ Yahan paste karein (module.exports se upar)
-router.post('/worker/update-location', async (req, res) => {
+// ✅ WORKER PROFILE & LOCATION FETCH (User App ke liye)
+router.get('/worker/:id', async (req, res) => {
     try {
-        const { workerId, lat, lng } = req.body;
+        // Sirf zaroori details bhejein (Password nahi)
+        const worker = await Worker.findById(req.params.id).select('-password');
         
-        if (!workerId) return res.status(400).json({ message: "Worker ID is required" });
+        if (!worker) {
+            return res.status(404).json({ success: false, message: "Worker nahi mila" });
+        }
 
-        await Worker.findByIdAndUpdate(workerId, {
-            location: {
-                type: "Point",
-                coordinates: [lng, lat] // [Longitude, Latitude]
-            },
-            lastLocationUpdate: new Date()
+        res.status(200).json({
+            success: true,
+            _id: worker._id,
+            name: worker.name,
+            phone: worker.phone,
+            serviceType: worker.serviceType,
+            averageRating: worker.averageRating || 0,
+            totalRatings: worker.totalRatings || 0,
+            // Flutter app latitude/longitude mangti hai coordinates se nikal kar de rahe hain
+            latitude: worker.location.coordinates[1], 
+            longitude: worker.location.coordinates[0],
+            isAvailable: worker.isAvailable
         });
-
-        console.log(`📍 Live Sync: Worker ${workerId} at ${lat}, ${lng}`);
-        res.status(200).json({ success: true, message: "Live Location Synced" });
     } catch (err) {
-        console.error("❌ Sync Error:", err.message);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
