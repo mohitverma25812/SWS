@@ -6,9 +6,15 @@ const BookingSchema = new mongoose.Schema({
         ref: 'User', 
         required: true 
     },
+    // ✅ BADLAV: Required hata diya gaya hai taaki broadcast ke waqt ye null reh sake
     worker: { 
         type: mongoose.Schema.Types.ObjectId, 
         ref: 'Worker', 
+        default: null 
+    },
+    // ✅ NAYA: Category wise broadcast karne ke liye zaroori hai
+    serviceType: { 
+        type: String, 
         required: true 
     },
     location: { 
@@ -34,10 +40,11 @@ const BookingSchema = new mongoose.Schema({
     },
     status: { 
         type: String, 
-        enum: ['pending', 'accepted', 'rejected', 'ongoing', 'completed'], 
+        // ✅ Status list mein 'cancelled' add kiya gaya hai
+        enum: ['pending', 'accepted', 'rejected', 'ongoing', 'completed', 'cancelled'], 
         default: 'pending' 
     },
-    // ⭐ NAYA BADLAV: Rating aur Comment fields
+    // ⭐ Rating aur Comment fields
     rating: { 
         type: Number, 
         default: 0 

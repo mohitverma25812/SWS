@@ -4,7 +4,7 @@ const Booking = require('../models/Booking');
 const Worker = require('../models/Worker'); 
 const crypto = require('crypto'); // OTP ke liye
 
-// 1. CREATE BOOKING (Broadcasting logic added)
+// 1. CREATE BOOKING (Broadcasting & Broadcast Model Integrated)
 router.post('/create', async (req, res) => {
     try {
         let { user, worker, location, price, latitude, longitude, serviceType } = req.body;
@@ -13,6 +13,7 @@ router.post('/create', async (req, res) => {
             return res.status(400).json({ message: "User ID zaroori hai" });
         }
 
+        // Parsing location string if sent in old format (lat|lng|address)
         if (location && typeof location === 'string' && location.includes('|')) {
             const parts = location.split('|');
             latitude = parseFloat(parts[0]);
@@ -23,45 +24,49 @@ router.post('/create', async (req, res) => {
         const generatedOtp = Math.floor(1000 + Math.random() * 9000).toString();
 
         const newBooking = new Booking({
-            user,      
-            worker: worker || null, // Broadcast ke liye worker null ho sakta hai shuru mein
+            user: user,      
+            worker: worker || null, // ✅ Broadcast ke liye worker null rahega shuru mein
             location: location || "Live Location",
             price: price || 199,      
-            status: 'pending',
+            status: 'pending', // ✅ Hamesha pending rahega creation par
             latitude: latitude,
             longitude: longitude,
             otp: generatedOtp,
-            serviceType: serviceType // Kaunsa worker chahiye (Plumber, etc.)
+            serviceType: serviceType, // ✅ Kaunsa worker chahiye (Plumber, etc.)
+            createdAt: new Date()
         });
 
         await newBooking.save();
 
-        // 🚀 SOCKET BROADCAST: Saare nearby category workers ko batayein
+        // 🚀 SOCKET BROADCAST: Saare nearby category workers ko message bhejein
         const io = req.app.get('socketio');
         if (io && serviceType) {
+            console.log(`📡 Broadcasting to room: ${serviceType}`);
             io.to(serviceType).emit("new_booking_available", {
                 bookingId: newBooking._id,
                 location: newBooking.location,
                 price: newBooking.price,
-                userName: "Customer", // Aap yahan user model se naam nikal sakte hain
-                serviceType: serviceType
+                userName: "Customer", 
+                serviceType: serviceType,
+                latitude: latitude,
+                longitude: longitude
             });
         }
 
         res.status(201).json({ 
             success: true, 
-            message: "Booking Successfully Saved!", 
+            message: "Booking request broadcasted Successfully!", 
             otp: generatedOtp, 
             booking: newBooking 
         });
 
     } catch (err) {
         console.error("Booking Error:", err);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 
-// ✅ NEW: ACCEPT BOOKING API (With Socket update)
+// ✅ ACCEPT BOOKING API (Worker jab "ACCEPT" dabaye)
 router.post('/accept-booking', async (req, res) => {
     try {
         const { bookingId, workerId, serviceType } = req.body;
@@ -72,7 +77,7 @@ router.post('/accept-booking', async (req, res) => {
         }
 
         // 1. Check agar pehle hi kisi ne accept kar liya ho
-        if (booking.status !== 'pending') {
+        if (booking.status !== 'pending' || booking.worker !== null) {
             return res.status(400).json({ success: false, message: "Too late! Already accepted by another worker." });
         }
 
@@ -95,7 +100,7 @@ router.post('/accept-booking', async (req, res) => {
     }
 });
 
-// ✅ 2. VERIFY OTP (Wallet logic remains same)
+// ✅ VERIFY OTP
 router.post('/verify-otp', async (req, res) => {
     try {
         const { bookingId, otp } = req.body;
@@ -122,6 +127,7 @@ router.post('/verify-otp', async (req, res) => {
     }
 });
 
+// ... (Baaki saare routes: update-status, earnings, upi, withdraw, reviews, history waisa hi rahega)
 // 3. UPDATE STATUS (Notification logic remains same)
 router.put('/update-status/:bookingId', async (req, res) => {
     try {
