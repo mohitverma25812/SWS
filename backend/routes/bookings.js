@@ -4,13 +4,13 @@ const Booking = require('../models/Booking');
 const Worker = require('../models/Worker'); 
 const crypto = require('crypto'); // OTP ke liye
 
-// 1. CREATE BOOKING (With OTP in Notification Body)
+// 1. CREATE BOOKING (Broadcasting logic added)
 router.post('/create', async (req, res) => {
     try {
-        let { user, worker, location, price, latitude, longitude } = req.body;
+        let { user, worker, location, price, latitude, longitude, serviceType } = req.body;
 
-        if (!user || !worker) {
-            return res.status(400).json({ message: "User ID aur Worker ID zaroori hai" });
+        if (!user) {
+            return res.status(400).json({ message: "User ID zaroori hai" });
         }
 
         if (location && typeof location === 'string' && location.includes('|')) {
@@ -24,36 +24,28 @@ router.post('/create', async (req, res) => {
 
         const newBooking = new Booking({
             user,      
-            worker,    
+            worker: worker || null, // Broadcast ke liye worker null ho sakta hai shuru mein
             location: location || "Live Location",
             price: price || 199,      
             status: 'pending',
             latitude: latitude,
             longitude: longitude,
-            otp: generatedOtp 
+            otp: generatedOtp,
+            serviceType: serviceType // Kaunsa worker chahiye (Plumber, etc.)
         });
 
         await newBooking.save();
 
-        const targetWorker = await Worker.findById(worker);
-        if (targetWorker && targetWorker.fcmToken) {
-            const firebaseAdmin = req.app.get('firebaseAdmin'); 
-            if (firebaseAdmin) {
-                const message = {
-                    notification: {
-                        title: 'New Booking Request! 🛠️',
-                        body: `Nayi job request! OTP: ${generatedOtp}. Customer se verify karein.`,
-                    },
-                    token: targetWorker.fcmToken,
-                    data: {
-                        bookingId: newBooking._id.toString(),
-                        otp: generatedOtp
-                    }
-                };
-                firebaseAdmin.messaging().send(message)
-                    .then((response) => console.log('✅ Sent notification with OTP to Worker'))
-                    .catch((error) => console.log('❌ Notification Error:', error));
-            }
+        // 🚀 SOCKET BROADCAST: Saare nearby category workers ko batayein
+        const io = req.app.get('socketio');
+        if (io && serviceType) {
+            io.to(serviceType).emit("new_booking_available", {
+                bookingId: newBooking._id,
+                location: newBooking.location,
+                price: newBooking.price,
+                userName: "Customer", // Aap yahan user model se naam nikal sakte hain
+                serviceType: serviceType
+            });
         }
 
         res.status(201).json({ 
@@ -69,17 +61,50 @@ router.post('/create', async (req, res) => {
     }
 });
 
-// ✅ 2. VERIFY OTP (Updated: Paisa Wallet mein add karne ke liye)
+// ✅ NEW: ACCEPT BOOKING API (With Socket update)
+router.post('/accept-booking', async (req, res) => {
+    try {
+        const { bookingId, workerId, serviceType } = req.body;
+        const booking = await Booking.findById(bookingId);
+
+        if (!booking) {
+            return res.status(404).json({ success: false, message: "Booking not found" });
+        }
+
+        // 1. Check agar pehle hi kisi ne accept kar liya ho
+        if (booking.status !== 'pending') {
+            return res.status(400).json({ success: false, message: "Too late! Already accepted by another worker." });
+        }
+
+        // 2. Worker assign karo aur status badlo
+        booking.worker = workerId;
+        booking.status = 'accepted';
+        await booking.save();
+
+        // 🚀 SOCKET UPDATE: Baaki saare workers ki screen se request hatao
+        const io = req.app.get('socketio');
+        if (io) {
+            io.to(serviceType || booking.serviceType).emit("remove_booking_request", { 
+                bookingId: booking._id 
+            });
+        }
+
+        res.status(200).json({ success: true, message: "Job assigned to you!", booking });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ✅ 2. VERIFY OTP (Wallet logic remains same)
 router.post('/verify-otp', async (req, res) => {
     try {
         const { bookingId, otp } = req.body;
         const booking = await Booking.findById(bookingId);
         
         if (booking && booking.otp === otp) {
-            booking.status = 'ongoing'; // Kaam shuru
+            booking.status = 'ongoing'; 
             await booking.save();
 
-            // 💰 Jab OTP verify ho jaye, tabhi worker ke wallet mein balance add karo
             const worker = await Worker.findById(booking.worker);
             if (worker) {
                 worker.walletBalance = (worker.walletBalance || 0) + (booking.price || 199);
@@ -97,7 +122,7 @@ router.post('/verify-otp', async (req, res) => {
     }
 });
 
-// 3. UPDATE STATUS (Notification logic)
+// 3. UPDATE STATUS (Notification logic remains same)
 router.put('/update-status/:bookingId', async (req, res) => {
     try {
         const { status } = req.body; 
@@ -141,7 +166,7 @@ router.put('/update-status/:bookingId', async (req, res) => {
     }
 });
 
-// 4. GET WORKER EARNINGS
+// 4. GET WORKER EARNINGS (Safe)
 router.get('/worker-earnings/:workerId', async (req, res) => {
     try {
         const completedJobs = await Booking.find({ 
@@ -156,7 +181,7 @@ router.get('/worker-earnings/:workerId', async (req, res) => {
     }
 });
 
-// 🔥 5. UPI ID Update karne ke liye
+// 🔥 5. UPI ID Update (Safe)
 router.put('/update-upi/:workerId', async (req, res) => {
     try {
         const { upiId } = req.body;
@@ -167,7 +192,7 @@ router.put('/update-upi/:workerId', async (req, res) => {
     }
 });
 
-// 🔥 6. Withdrawal Request bhejne ke liye
+// 🔥 6. Withdrawal Request (Safe)
 router.post('/withdraw-request', async (req, res) => {
     try {
         const { workerId, amount } = req.body;
@@ -177,7 +202,6 @@ router.post('/withdraw-request', async (req, res) => {
             return res.status(400).json({ success: false, message: "Balance kam hai bhai!" });
         }
 
-        // Wallet se balance kato aur request list mein dalo
         worker.walletBalance -= amount;
         worker.withdrawals.push({ amount: amount, status: 'pending' });
         
@@ -188,25 +212,23 @@ router.post('/withdraw-request', async (req, res) => {
     }
 });
 
-// 7. GET ALL REVIEWS FOR A WORKER
+// 7. GET ALL REVIEWS (Safe)
 router.get('/worker-reviews/:workerId', async (req, res) => {
     try {
-        const { workerId } = req.params;
         const reviews = await Booking.find({ 
-            worker: workerId, 
+            worker: req.params.workerId, 
             status: 'completed',
             rating: { $gt: 0 } 
         })
         .populate('user', 'name') 
         .sort({ createdAt: -1 }); 
-
         res.status(200).json(reviews);
     } catch (error) {
         res.status(500).json({ message: "Server Error", error });
     }
 });
 
-// 8. GET USER BOOKINGS
+// 8. GET USER BOOKINGS (Safe)
 router.get('/my-bookings/:userId', async (req, res) => {
     try {
         const bookings = await Booking.find({ user: req.params.userId })
@@ -218,7 +240,7 @@ router.get('/my-bookings/:userId', async (req, res) => {
     }
 });
 
-// 9. GET WORKER REQUESTS
+// 9. GET WORKER REQUESTS (Safe)
 router.get('/worker-requests/:workerId', async (req, res) => {
     try {
         const bookings = await Booking.find({ 
@@ -233,7 +255,7 @@ router.get('/worker-requests/:workerId', async (req, res) => {
     }
 });
 
-// 10. SUBMIT RATING
+// 10. SUBMIT RATING (Safe)
 router.post('/rate-worker', async (req, res) => {
     try {
         const { workerId, userId, rating, comment, bookingId } = req.body;
@@ -246,7 +268,6 @@ router.post('/rate-worker', async (req, res) => {
         worker.averageRating = (currentTotal + rating) / worker.totalRatings;
 
         await worker.save();
-
         await Booking.findByIdAndUpdate(bookingId, { 
             status: 'completed',
             rating: rating,
@@ -259,11 +280,10 @@ router.post('/rate-worker', async (req, res) => {
     }
 });
 
-// 11. GET WORKER HISTORY
+// 11. GET WORKER HISTORY (Safe)
 router.get('/worker-history/:workerId', async (req, res) => {
     try {
-        const { workerId } = req.params;
-        const bookings = await Booking.find({ worker: workerId })
+        const bookings = await Booking.find({ worker: req.params.workerId })
             .populate('user', 'name phone email') 
             .sort({ createdAt: -1 });
         res.json(bookings);
@@ -272,12 +292,10 @@ router.get('/worker-history/:workerId', async (req, res) => {
     }
 });
 
-// 🏦 12. ADMIN: Saari pending withdrawal requests dekhna
+// 🏦 12. ADMIN Withdrawals (Safe)
 router.get('/admin/withdrawals', async (req, res) => {
     try {
-        // Un saare workers ko dhundho jinki koi request 'pending' hai
         const workers = await Worker.find({ "withdrawals.status": "pending" }, 'name upiId withdrawals');
-        
         let pendingRequests = [];
         workers.forEach(worker => {
             worker.withdrawals.forEach(reqst => {
@@ -299,23 +317,18 @@ router.get('/admin/withdrawals', async (req, res) => {
     }
 });
 
-// ✅ 13. ADMIN: Withdrawal request ko Approve/Reject karna
+// ✅ 13. ADMIN Withdraw Action (Safe)
 router.put('/admin/withdraw-action', async (req, res) => {
     try {
-        const { workerId, requestId, action } = req.body; // action: 'success' or 'rejected'
-
+        const { workerId, requestId, action } = req.body;
         const worker = await Worker.findById(workerId);
         if (!worker) return res.status(404).json({ message: "Worker not found" });
-
         const request = worker.withdrawals.id(requestId);
         if (!request) return res.status(404).json({ message: "Request not found" });
 
-        // Action logic
         if (action === 'success') {
             request.status = 'success';
-            // Balance already request bhejte waqt minus ho chuka hai (Route #6)
         } else if (action === 'rejected') {
-            // Agar reject hua toh paisa wapas wallet mein dalo
             worker.walletBalance += request.amount;
             request.status = 'rejected';
         }
