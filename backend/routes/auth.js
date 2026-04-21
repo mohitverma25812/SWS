@@ -44,7 +44,7 @@ router.post('/register/worker', async (req, res) => {
     }
 });
 
-// 3. LOGIN API
+// 3. LOGIN API (Updated to include Phone)
 router.post('/login', async (req, res) => {
     try {
         const { email, password, role } = req.body;
@@ -63,6 +63,7 @@ router.post('/login', async (req, res) => {
                 userId: user._id, 
                 name: user.name, 
                 email: user.email, 
+                phone: user.phone, // ✅ Ab phone number bhi response mein jayega
                 role: role, 
                 serviceType: user.serviceType,
                 fcmToken: user.fcmToken || "" 
