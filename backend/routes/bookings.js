@@ -13,7 +13,6 @@ router.post('/create', async (req, res) => {
             return res.status(400).json({ message: "User ID zaroori hai" });
         }
 
-        // Parsing location string if sent in old format (lat|lng|address)
         if (location && typeof location === 'string' && location.includes('|')) {
             const parts = location.split('|');
             latitude = parseFloat(parts[0]);
@@ -25,20 +24,19 @@ router.post('/create', async (req, res) => {
 
         const newBooking = new Booking({
             user: user,      
-            worker: worker || null, // ✅ Broadcast ke liye worker null rahega shuru mein
+            worker: worker || null, 
             location: location || "Live Location",
             price: price || 199,      
-            status: 'pending', // ✅ Hamesha pending rahega creation par
+            status: 'pending', 
             latitude: latitude,
             longitude: longitude,
             otp: generatedOtp,
-            serviceType: serviceType, // ✅ Kaunsa worker chahiye (Plumber, etc.)
+            serviceType: serviceType, 
             createdAt: new Date()
         });
 
         await newBooking.save();
 
-        // 🚀 SOCKET BROADCAST: Saare nearby category workers ko message bhejein
         const io = req.app.get('socketio');
         if (io && serviceType) {
             console.log(`📡 Broadcasting to room: ${serviceType}`);
@@ -65,7 +63,8 @@ router.post('/create', async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 });
-// ✅ Correct Route for Acceptance (Updated with Populate & Details)
+
+// ✅ Correct Route for Acceptance
 router.post('/accept-booking', async (req, res) => {
     try {
         const { bookingId, workerId, serviceType } = req.body;
@@ -76,34 +75,26 @@ router.post('/accept-booking', async (req, res) => {
             return res.status(404).json({ success: false, message: "Booking nahi mili!" });
         }
 
-        // Check agar booking pending hai ya nahi
         if (booking.status !== 'pending' || booking.worker !== null) {
             return res.status(400).json({ success: false, message: "Pehle hi kisi ne accept kar liya hai." });
         }
 
-        // 1. Database mein worker assign karein
         booking.worker = workerId;
         booking.status = 'accepted';
         await booking.save();
 
-        // 2. ✅ UPDATE: Worker ki details (Name, Phone, Rating) fetch karein
         const updatedBooking = await Booking.findById(booking._id)
             .populate('worker', 'name phone averageRating location');
 
         const io = req.app.get('socketio');
         if (io) {
-            // ✅ Feature 1: Baaki workers ki screen se request hatana
             io.to(serviceType || booking.serviceType).emit("remove_booking_request", { bookingId: booking._id });
-            
-            // ✅ Feature 2: User ko specific room mein signal bhejna (Details ke saath)
-            // Isse user app ka "Searching" popup apne aap band ho jayega
             io.emit(`booking_accepted_${booking.user}`, { 
                 message: "Worker is on the way!",
                 booking: updatedBooking 
             });
         }
 
-        // Response mein bhi updated data bhejein
         res.status(200).json({ 
             success: true, 
             message: "Job assigned successfully", 
@@ -114,7 +105,8 @@ router.post('/accept-booking', async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 });
-// ✅ VERIFY OTP
+
+// ✅ VERIFY OTP (Updated with 5% Commission Logic as requested)
 router.post('/verify-otp', async (req, res) => {
     try {
         const { bookingId, otp } = req.body;
@@ -126,14 +118,22 @@ router.post('/verify-otp', async (req, res) => {
 
             const worker = await Worker.findById(booking.worker);
             if (worker) {
-                worker.walletBalance = (worker.walletBalance || 0) + (booking.price || 199);
+                // 🚀 START COMMISSION LOGIC
+                const totalAmount = booking.price || 199;
+                const commission = totalAmount * 0.05; // 5% Company ka commission
+                const workerShare = totalAmount - commission; // 95% Worker ka paisa
+
+                worker.walletBalance = (worker.walletBalance || 0) + workerShare; // Worker ko net amount mila
                 await worker.save();
+                // 🚀 END COMMISSION LOGIC
+
+                return res.json({ 
+                    success: true, 
+                    message: `OTP Verified! ₹${workerShare.toFixed(2)} added to wallet (5% platform fee deducted).` 
+                });
             }
 
-            return res.json({ 
-                success: true, 
-                message: "OTP Verified! ₹" + (booking.price || 199) + " added to your wallet." 
-            });
+            return res.json({ success: true, message: "OTP Verified!" });
         }
         res.status(400).json({ success: false, message: "Invalid OTP" });
     } catch (err) {
@@ -141,8 +141,7 @@ router.post('/verify-otp', async (req, res) => {
     }
 });
 
-// ... (Baaki saare routes: update-status, earnings, upi, withdraw, reviews, history waisa hi rahega)
-// 3. UPDATE STATUS (Notification logic remains same)
+// 3. UPDATE STATUS
 router.put('/update-status/:bookingId', async (req, res) => {
     try {
         const { status } = req.body; 
@@ -186,7 +185,7 @@ router.put('/update-status/:bookingId', async (req, res) => {
     }
 });
 
-// 4. GET WORKER EARNINGS (Safe)
+// 4. GET WORKER EARNINGS
 router.get('/worker-earnings/:workerId', async (req, res) => {
     try {
         const completedJobs = await Booking.find({ 
@@ -201,7 +200,7 @@ router.get('/worker-earnings/:workerId', async (req, res) => {
     }
 });
 
-// 🔥 5. UPI ID Update (Safe)
+// 5. UPI ID Update
 router.put('/update-upi/:workerId', async (req, res) => {
     try {
         const { upiId } = req.body;
@@ -212,7 +211,7 @@ router.put('/update-upi/:workerId', async (req, res) => {
     }
 });
 
-// 🔥 6. Withdrawal Request (Safe)
+// 6. Withdrawal Request
 router.post('/withdraw-request', async (req, res) => {
     try {
         const { workerId, amount } = req.body;
@@ -232,7 +231,7 @@ router.post('/withdraw-request', async (req, res) => {
     }
 });
 
-// 7. GET ALL REVIEWS (Safe)
+// 7. GET ALL REVIEWS
 router.get('/worker-reviews/:workerId', async (req, res) => {
     try {
         const reviews = await Booking.find({ 
@@ -248,7 +247,7 @@ router.get('/worker-reviews/:workerId', async (req, res) => {
     }
 });
 
-// 8. GET USER BOOKINGS (Safe)
+// 8. GET USER BOOKINGS
 router.get('/my-bookings/:userId', async (req, res) => {
     try {
         const bookings = await Booking.find({ user: req.params.userId })
@@ -260,7 +259,7 @@ router.get('/my-bookings/:userId', async (req, res) => {
     }
 });
 
-// 9. GET WORKER REQUESTS (Safe)
+// 9. GET WORKER REQUESTS
 router.get('/worker-requests/:workerId', async (req, res) => {
     try {
         const bookings = await Booking.find({ 
@@ -275,7 +274,7 @@ router.get('/worker-requests/:workerId', async (req, res) => {
     }
 });
 
-// 10. SUBMIT RATING (Safe)
+// 10. SUBMIT RATING
 router.post('/rate-worker', async (req, res) => {
     try {
         const { workerId, userId, rating, comment, bookingId } = req.body;
@@ -300,7 +299,7 @@ router.post('/rate-worker', async (req, res) => {
     }
 });
 
-// 11. GET WORKER HISTORY (Safe)
+// 11. GET WORKER HISTORY
 router.get('/worker-history/:workerId', async (req, res) => {
     try {
         const bookings = await Booking.find({ worker: req.params.workerId })
@@ -312,7 +311,7 @@ router.get('/worker-history/:workerId', async (req, res) => {
     }
 });
 
-// 🏦 12. ADMIN Withdrawals (Safe)
+// 🏦 12. ADMIN Withdrawals
 router.get('/admin/withdrawals', async (req, res) => {
     try {
         const workers = await Worker.find({ "withdrawals.status": "pending" }, 'name upiId withdrawals');
@@ -337,7 +336,7 @@ router.get('/admin/withdrawals', async (req, res) => {
     }
 });
 
-// ✅ 13. ADMIN Withdraw Action (Safe)
+// ✅ 13. ADMIN Withdraw Action
 router.put('/admin/withdraw-action', async (req, res) => {
     try {
         const { workerId, requestId, action } = req.body;

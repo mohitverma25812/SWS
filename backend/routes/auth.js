@@ -44,7 +44,7 @@ router.post('/register/worker', async (req, res) => {
     }
 });
 
-// 3. LOGIN API (Updated to include Phone)
+// 3. LOGIN API (With Wallet Status check)
 router.post('/login', async (req, res) => {
     try {
         const { email, password, role } = req.body;
@@ -63,8 +63,9 @@ router.post('/login', async (req, res) => {
                 userId: user._id, 
                 name: user.name, 
                 email: user.email, 
-                phone: user.phone, // ✅ Ab phone number bhi response mein jayega
+                phone: user.phone,
                 role: role, 
+                walletBalance: user.walletBalance || 0, // ✅ Wallet balance bhejna zaroori hai
                 serviceType: user.serviceType,
                 fcmToken: user.fcmToken || "" 
             }
@@ -74,13 +75,35 @@ router.post('/login', async (req, res) => {
     }
 });
 
-// 🔔 4. UPDATE FCM TOKEN
-router.put('/update-fcm-token/:id', async (req, res) => {
+// 4. UPDATE AVAILABILITY (Uber Logic: Negative balance check + Daily Fee)
+router.put('/update-availability/:id', async (req, res) => {
     try {
-        const { fcmToken, role } = req.body;
-        const Model = role === 'worker' ? Worker : User;
-        await Model.findByIdAndUpdate(req.params.id, { fcmToken });
-        res.status(200).json({ success: true, message: "FCM Token Updated" });
+        const { isAvailable } = req.body;
+        const worker = await Worker.findById(req.params.id);
+
+        if (!worker) return res.status(404).json({ message: "Worker nahi mila" });
+
+        if (isAvailable) {
+            // 1. Check if balance is negative
+            if (worker.walletBalance < 0) {
+                return res.status(403).json({ 
+                    success: false, 
+                    message: `Pehle pending balance (₹${Math.abs(worker.walletBalance)}) jama karein!` 
+                });
+            }
+
+            // 2. Daily Platform Fee (₹20) Logic
+            const today = new Date().toISOString().split('T')[0];
+            if (worker.lastOnlineDate !== today) {
+                worker.walletBalance -= 20; // Auto deduct ₹20
+                worker.lastOnlineDate = today;
+                console.log(`💸 ₹20 deducted from worker ${worker.name} for today.`);
+            }
+        }
+
+        worker.isAvailable = isAvailable;
+        await worker.save();
+        res.status(200).json({ success: true, walletBalance: worker.walletBalance });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -90,89 +113,36 @@ router.put('/update-fcm-token/:id', async (req, res) => {
 router.get('/workers', async (req, res) => {
     try {
         const workers = await Worker.find({ isAvailable: true }, '-password'); 
-        const formattedWorkers = workers.map(worker => ({
-            _id: worker._id,
-            name: worker.name,
-            serviceType: worker.serviceType,
-            latitude: worker.location.coordinates[1],
-            longitude: worker.location.coordinates[0]
-        }));
-        res.status(200).json(formattedWorkers);
+        res.status(200).json(workers);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// 6. UPDATE WORKER LOCATION (Existing PUT method)
-router.put('/update-location/:id', async (req, res) => {
-    try {
-        const { latitude, longitude } = req.body;
-        await Worker.findByIdAndUpdate(req.params.id, {
-            location: { type: "Point", coordinates: [longitude, latitude] }
-        });
-        res.status(200).json({ success: true, message: "Location Updated" });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// ✅ 7. NEW: WORKER LIVE LOCATION UPDATE (POST method for Flutter LocationService)
+// 6. LIVE LOCATION UPDATE
 router.post('/worker/update-location', async (req, res) => {
     try {
         const { workerId, lat, lng } = req.body;
-        
-        if (!workerId) return res.status(400).json({ message: "Worker ID is required" });
-
         await Worker.findByIdAndUpdate(workerId, {
-            location: {
-                type: "Point",
-                coordinates: [lng, lat] // MongoDB expects [Longitude, Latitude]
-            },
+            location: { type: "Point", coordinates: [lng, lat] },
             lastLocationUpdate: new Date()
         });
-
-        console.log(`📍 Live Location Sync: Worker ${workerId} at ${lat}, ${lng}`);
-        res.status(200).json({ success: true, message: "Live Location Synced" });
-    } catch (err) {
-        console.error("❌ Location Sync Error:", err.message);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// 8. UPDATE AVAILABILITY
-router.put('/update-availability/:id', async (req, res) => {
-    try {
-        const { isAvailable } = req.body;
-        await Worker.findByIdAndUpdate(req.params.id, { isAvailable });
-        res.status(200).json({ success: true, message: "Status Updated" });
+        res.status(200).json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-
-// ✅ WORKER PROFILE & LOCATION FETCH (User App ke liye)
+// 7. GET WORKER PROFILE
 router.get('/worker/:id', async (req, res) => {
     try {
-        // Sirf zaroori details bhejein (Password nahi)
         const worker = await Worker.findById(req.params.id).select('-password');
-        
-        if (!worker) {
-            return res.status(404).json({ success: false, message: "Worker nahi mila" });
-        }
-
+        if (!worker) return res.status(404).json({ success: false, message: "Worker nahi mila" });
         res.status(200).json({
             success: true,
-            _id: worker._id,
-            name: worker.name,
-            phone: worker.phone,
-            serviceType: worker.serviceType,
-            averageRating: worker.averageRating || 0,
-            totalRatings: worker.totalRatings || 0,
-            // Flutter app latitude/longitude mangti hai coordinates se nikal kar de rahe hain
+            ...worker._doc,
             latitude: worker.location.coordinates[1], 
-            longitude: worker.location.coordinates[0],
-            isAvailable: worker.isAvailable
+            longitude: worker.location.coordinates[0]
         });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });

@@ -14,7 +14,7 @@ const workerSchema = new mongoose.Schema({
         coordinates: { type: [Number], index: "2dsphere" } 
     },
 
-    // ✅ LIVE TRACKING FIELD (Naya add kiya)
+    // ✅ LIVE TRACKING FIELD
     lastLocationUpdate: { 
         type: Date, 
         default: Date.now 
@@ -43,6 +43,17 @@ const workerSchema = new mongoose.Schema({
         type: Number, 
         default: 0 
     },
+
+    // 👇 NEW FIELDS ADDED HERE
+    lastOnlineDate: { 
+        type: String, 
+        default: "" 
+    }, // Aaj ki platform fee date check karne ke liye
+    isBlocked: { 
+        type: Boolean, 
+        default: false 
+    }, // Negative balance block status
+
     upiId: { 
         type: String, 
         default: "" 
