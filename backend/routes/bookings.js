@@ -65,8 +65,7 @@ router.post('/create', async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 });
-
-// ✅ Correct Route for Acceptance
+// ✅ Correct Route for Acceptance (Updated with Populate & Details)
 router.post('/accept-booking', async (req, res) => {
     try {
         const { bookingId, workerId, serviceType } = req.body;
@@ -77,27 +76,39 @@ router.post('/accept-booking', async (req, res) => {
             return res.status(404).json({ success: false, message: "Booking nahi mili!" });
         }
 
+        // Check agar booking pending hai ya nahi
         if (booking.status !== 'pending' || booking.worker !== null) {
             return res.status(400).json({ success: false, message: "Pehle hi kisi ne accept kar liya hai." });
         }
 
+        // 1. Database mein worker assign karein
         booking.worker = workerId;
         booking.status = 'accepted';
         await booking.save();
 
+        // 2. ✅ UPDATE: Worker ki details (Name, Phone, Rating) fetch karein
+        const updatedBooking = await Booking.findById(booking._id)
+            .populate('worker', 'name phone averageRating location');
+
         const io = req.app.get('socketio');
         if (io) {
-            // Baaki workers ki screen se request hatane ke liye
+            // ✅ Feature 1: Baaki workers ki screen se request hatana
             io.to(serviceType || booking.serviceType).emit("remove_booking_request", { bookingId: booking._id });
             
-            // User ko batane ke liye ki worker mil gaya hai (Custom User Room)
+            // ✅ Feature 2: User ko specific room mein signal bhejna (Details ke saath)
+            // Isse user app ka "Searching" popup apne aap band ho jayega
             io.emit(`booking_accepted_${booking.user}`, { 
                 message: "Worker is on the way!",
-                booking 
+                booking: updatedBooking 
             });
         }
 
-        res.status(200).json({ success: true, message: "Job assigned successfully", booking });
+        // Response mein bhi updated data bhejein
+        res.status(200).json({ 
+            success: true, 
+            message: "Job assigned successfully", 
+            booking: updatedBooking 
+        });
     } catch (error) {
         console.error("❌ Accept Error:", error);
         res.status(500).json({ success: false, message: error.message });
