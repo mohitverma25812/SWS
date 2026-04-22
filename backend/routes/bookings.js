@@ -200,14 +200,30 @@ router.get('/worker-earnings/:workerId', async (req, res) => {
     }
 });
 
-// 5. UPI ID Update
-router.put('/update-upi/:workerId', async (req, res) => {
+// Worker ki UPI ID update karne ka route
+router.put('/update-upi', async (req, res) => {
     try {
-        const { upiId } = req.body;
-        await Worker.findByIdAndUpdate(req.params.workerId, { upiId: upiId });
-        res.json({ success: true, message: "UPI ID Updated Successfully!" });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+        const { workerId, upiId } = req.body; // Frontend se data aayega
+
+        if (!workerId || !upiId) {
+            return res.status(400).json({ success: false, message: "Missing data" });
+        }
+
+        // Database mein update karein
+        const worker = await Worker.findByIdAndUpdate(
+            workerId, 
+            { upiId: upiId }, 
+            { new: true }
+        );
+
+        if (!worker) {
+            return res.status(404).json({ success: false, message: "Worker not found" });
+        }
+
+        res.status(200).json({ success: true, message: "UPI Updated Successfully", upiId: worker.upiId });
+    } catch (error) {
+        console.error("UPI Update Error:", error);
+        res.status(500).json({ success: false, message: "Server Error" });
     }
 });
 
