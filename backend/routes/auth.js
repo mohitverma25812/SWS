@@ -65,7 +65,7 @@ router.post('/login', async (req, res) => {
                 email: user.email, 
                 phone: user.phone,
                 role: role, 
-                walletBalance: user.walletBalance || 0, // ✅ Wallet balance bhejna zaroori hai
+                walletBalance: user.walletBalance || 0,
                 serviceType: user.serviceType,
                 fcmToken: user.fcmToken || "" 
             }
@@ -146,6 +146,45 @@ router.get('/worker/:id', async (req, res) => {
         });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 8. UPDATE WORKER UPI ID (Payouts ke liye)
+router.put('/update-upi', async (req, res) => {
+    try {
+        const { workerId, upiId } = req.body;
+
+        if (!workerId || !upiId) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Worker ID aur UPI ID dono zaroori hain!" 
+            });
+        }
+
+        const updatedWorker = await Worker.findByIdAndUpdate(
+            workerId,
+            { upiId: upiId },
+            { new: true }
+        );
+
+        if (!updatedWorker) {
+            return res.status(404).json({ 
+                success: false, 
+                message: "Worker nahi mila!" 
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "UPI ID successfully update ho gayi!",
+            upiId: updatedWorker.upiId
+        });
+
+    } catch (err) {
+        res.status(500).json({ 
+            success: false, 
+            error: err.message 
+        });
     }
 });
 

@@ -327,11 +327,13 @@ router.get('/worker-history/:workerId', async (req, res) => {
     }
 });
 
-// 🏦 12. ADMIN Withdrawals
+// 🏦 12. ADMIN Withdrawals (Updated for Safety & Date Format)
 router.get('/admin/withdrawals', async (req, res) => {
     try {
+        // Sirf wahi workers dhoondhna jinpe pending withdrawal hai
         const workers = await Worker.find({ "withdrawals.status": "pending" }, 'name upiId withdrawals');
         let pendingRequests = [];
+        
         workers.forEach(worker => {
             worker.withdrawals.forEach(reqst => {
                 if (reqst.status === 'pending') {
@@ -339,16 +341,17 @@ router.get('/admin/withdrawals', async (req, res) => {
                         requestId: reqst._id,
                         workerId: worker._id,
                         workerName: worker.name,
-                        upiId: worker.upiId,
+                        upiId: worker.upiId || "Not Set",
                         amount: reqst.amount,
-                        date: reqst.date
+                        // ✅ Yahan par date format update kar diya gaya hai
+                        date: reqst.date ? reqst.date.toISOString().split('T')[0] : "N/A"
                     });
                 }
             });
         });
         res.status(200).json(pendingRequests);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
