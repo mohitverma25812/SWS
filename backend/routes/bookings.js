@@ -227,23 +227,45 @@ router.put('/update-upi', async (req, res) => {
     }
 });
 
-// 6. Withdrawal Request
+// 6. Withdrawal Request (REPLACED WITH SECURE LOGIC)
 router.post('/withdraw-request', async (req, res) => {
     try {
         const { workerId, amount } = req.body;
+        
+        // 1. Worker dhoondhein
         const worker = await Worker.findById(workerId);
 
-        if (!worker || (worker.walletBalance || 0) < amount) {
+        if (!worker) {
+            return res.status(404).json({ success: false, message: "Worker nahi mila!" });
+        }
+
+        // 2. Check karein ki balance kafi hai ya nahi
+        if ((worker.walletBalance || 0) < amount) {
             return res.status(400).json({ success: false, message: "Balance kam hai bhai!" });
         }
 
+        // 3. Paisa kaatein aur withdrawal array mein entry daalein
         worker.walletBalance -= amount;
-        worker.withdrawals.push({ amount: amount, status: 'pending' });
         
+        // Mongoose sub-document push
+        worker.withdrawals.push({
+            amount: amount,
+            status: 'pending',
+            date: new Date()
+        });
+        
+        // 4. Database mein save karein
         await worker.save();
-        res.json({ success: true, message: "Withdrawal request sent! Admin verify karega." });
+
+        res.json({ 
+            success: true, 
+            message: "Withdrawal request sent! Admin verify karega.",
+            newBalance: worker.walletBalance 
+        });
+
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error("Withdraw Error:", err);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
