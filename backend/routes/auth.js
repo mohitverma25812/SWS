@@ -188,4 +188,24 @@ router.put('/update-upi', async (req, res) => {
     }
 });
 
+
+// ✅ NEW: Worker ki apni withdrawal history
+router.get('/worker-withdrawals/:workerId', async (req, res) => {
+    try {
+        const worker = await Worker.findById(req.params.workerId).select('withdrawals walletBalance');
+        if (!worker) return res.status(404).json({ success: false, message: "Worker not found" });
+        
+        // Latest pehle
+        const sorted = [...worker.withdrawals].sort((a, b) => new Date(b.date) - new Date(a.date));
+        
+        res.status(200).json({ 
+            success: true, 
+            withdrawals: sorted,
+            currentBalance: worker.walletBalance 
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
