@@ -17,6 +17,10 @@ const BookingSchema = new mongoose.Schema({
         type: String, 
         required: true 
     },
+    subService: {
+    type: String,
+    default: ""
+},
     location: { 
         type: String, 
         default: "Live Location" 
