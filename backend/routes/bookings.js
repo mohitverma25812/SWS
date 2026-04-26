@@ -404,4 +404,263 @@ router.put('/admin/withdraw-action', async (req, res) => {
     }
 });
 
+// ✅ CANCEL BOOKING WITH REASON + AUTO PENALIZE
+router.put('/cancel/:bookingId', async (req, res) => {
+  try {
+    const { reason, cancelledBy, userId } = req.body;
+    const booking = await Booking.findById(req.params.bookingId);
+    if (!booking) return res.status(404).json({ message: 'Booking not found' });
+
+    booking.status = 'cancelled';
+    booking.cancelReason = reason;
+    booking.cancelledBy = cancelledBy;
+    await booking.save();
+
+    // Auto-penalize worker agar 3+ cancellations in 7 days
+    if (cancelledBy === 'worker' && booking.worker) {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const recentCancels = await Booking.countDocuments({
+        worker: booking.worker,
+        status: 'cancelled',
+        cancelledBy: 'worker',
+        updatedAt: { $gte: sevenDaysAgo }
+      });
+
+      if (recentCancels >= 3) {
+        await Worker.findByIdAndUpdate(booking.worker, {
+          $inc: { walletBalance: -50 }, // ₹50 penalty
+          cancelPenaltyCount: recentCancels
+        });
+      }
+    }
+
+    // Refund user if cancelled by worker
+    if (cancelledBy === 'worker') {
+      const firebaseAdmin = req.app.get('firebaseAdmin');
+      const user = await User.findById(booking.user);
+      if (firebaseAdmin && user?.fcmToken) {
+        await firebaseAdmin.messaging().send({
+          notification: {
+            title: '❌ Booking Cancelled',
+            body: `Worker ne booking cancel ki. Reason: ${reason}. Aap dobara book kar sakte hain.`
+          },
+          token: user.fcmToken
+        }).catch(() => {});
+      }
+    }
+
+    res.json({ success: true, message: 'Booking cancelled', booking });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ SURGE PRICING — Check karo kitne workers available hain
+router.get('/surge-price/:serviceType', async (req, res) => {
+  try {
+    const { serviceType } = req.params;
+    const { basePrice } = req.query;
+
+    // Available workers dhundho
+    const availableWorkers = await Worker.countDocuments({
+      serviceType,
+      isAvailable: true
+    });
+
+    // Last 30 min mein kitni bookings
+    const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000);
+    const recentBookings = await Booking.countDocuments({
+      serviceType,
+      createdAt: { $gte: thirtyMinsAgo }
+    });
+
+    // Surge logic
+    let surgeMultiplier = 1.0;
+    if (availableWorkers === 0) {
+      surgeMultiplier = 1.5;
+    } else {
+      const demandRatio = recentBookings / availableWorkers;
+      if (demandRatio > 3) surgeMultiplier = 1.5;
+      else if (demandRatio > 2) surgeMultiplier = 1.3;
+      else if (demandRatio > 1) surgeMultiplier = 1.2;
+    }
+
+    const finalPrice = Math.ceil((parseFloat(basePrice) || 199) * surgeMultiplier);
+
+    res.json({
+      success: true,
+      surgeMultiplier,
+      isSurge: surgeMultiplier > 1.0,
+      finalPrice,
+      availableWorkers,
+      recentBookings
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ CHAT MESSAGES — Save & Get
+router.post('/chat/send', async (req, res) => {
+  try {
+    const { bookingId, senderId, senderRole, message } = req.body;
+    const booking = await Booking.findById(bookingId);
+    if (!booking) return res.status(404).json({ message: 'Booking not found' });
+
+    booking.chatMessages.push({
+      senderId,
+      senderRole,
+      message,
+      timestamp: new Date()
+    });
+    await booking.save();
+
+    // Socket emit
+    const io = req.app.get('socketio');
+    if (io) {
+      io.emit(`chat_${bookingId}`, {
+        senderId, senderRole, message,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/chat/:bookingId', async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.bookingId)
+      .select('chatMessages');
+    if (!booking) return res.status(404).json({ message: 'Not found' });
+    res.json(booking.chatMessages || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ WORKER EARNINGS DASHBOARD
+router.get('/worker-dashboard/:workerId', async (req, res) => {
+  try {
+    const workerId = req.params.workerId;
+    const now = new Date();
+
+    // Date ranges
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekStart = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const allCompleted = await Booking.find({
+      worker: workerId,
+      status: 'completed'
+    }).sort({ createdAt: 1 });
+
+    const todayEarnings = allCompleted
+      .filter(b => new Date(b.createdAt) >= todayStart)
+      .reduce((s, b) => s + (b.price * 0.95), 0);
+
+    const weekEarnings = allCompleted
+      .filter(b => new Date(b.createdAt) >= weekStart)
+      .reduce((s, b) => s + (b.price * 0.95), 0);
+
+    const monthEarnings = allCompleted
+      .filter(b => new Date(b.createdAt) >= monthStart)
+      .reduce((s, b) => s + (b.price * 0.95), 0);
+
+    const totalEarnings = allCompleted
+      .reduce((s, b) => s + (b.price * 0.95), 0);
+
+    // Last 7 days daily breakdown
+    const last7Days = [];
+    for (let i = 6; i >= 0; i--) {
+      const day = new Date(now - i * 24 * 60 * 60 * 1000);
+      const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+      const dayEarn = allCompleted
+        .filter(b => {
+          const d = new Date(b.createdAt);
+          return d >= dayStart && d < dayEnd;
+        })
+        .reduce((s, b) => s + (b.price * 0.95), 0);
+
+      last7Days.push({
+        date: dayStart.toISOString().split('T')[0],
+        earnings: Math.round(dayEarn),
+        jobs: allCompleted.filter(b => {
+          const d = new Date(b.createdAt);
+          return d >= dayStart && d < dayEnd;
+        }).length
+      });
+    }
+
+    const worker = await Worker.findById(workerId).select(
+      'averageRating totalRatings walletBalance withdrawals'
+    );
+    const totalWithdrawn = (worker?.withdrawals || [])
+      .filter(w => w.status === 'success')
+      .reduce((s, w) => s + w.amount, 0);
+
+    res.json({
+      success: true,
+      today: Math.round(todayEarnings),
+      week: Math.round(weekEarnings),
+      month: Math.round(monthEarnings),
+      total: Math.round(totalEarnings),
+      totalJobs: allCompleted.length,
+      averageRating: worker?.averageRating || 0,
+      totalRatings: worker?.totalRatings || 0,
+      walletBalance: worker?.walletBalance || 0,
+      totalWithdrawn,
+      last7Days
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ NEARBY NOTIFICATION — Worker 500m pe hai
+router.post('/notify-nearby', async (req, res) => {
+  try {
+    const { bookingId, workerLat, workerLng } = req.body;
+    const booking = await Booking.findById(bookingId).populate('user', 'fcmToken name');
+    if (!booking) return res.status(404).json({ message: 'Not found' });
+
+    const dist = getDistanceMeters(
+      workerLat, workerLng,
+      booking.latitude, booking.longitude
+    );
+
+    if (dist <= 500 && !booking.nearbyNotified) {
+      booking.nearbyNotified = true;
+      await booking.save();
+
+      const firebaseAdmin = req.app.get('firebaseAdmin');
+      if (firebaseAdmin && booking.user?.fcmToken) {
+        await firebaseAdmin.messaging().send({
+          notification: {
+            title: '🏃 Worker Paas Aa Gaya!',
+            body: 'Worker sirf 500 meter door hai. Taiyaar rahein!'
+          },
+          token: booking.user.fcmToken
+        }).catch(() => {});
+      }
+      return res.json({ success: true, notified: true, distance: dist });
+    }
+    res.json({ success: true, notified: false, distance: dist });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function getDistanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 +
+    Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
 module.exports = router;

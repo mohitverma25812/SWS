@@ -13,6 +13,9 @@ const workerSchema = new mongoose.Schema({
         type: { type: String, default: "Point" },
         coordinates: { type: [Number], index: "2dsphere" } 
     },
+    profileImage: { type: String, default: "" },
+idDocumentUrl: { type: String, default: "" },
+cancelPenaltyCount: { type: Number, default: 0 },
 
     // ✅ LIVE TRACKING FIELD
     lastLocationUpdate: { 

@@ -1,6 +1,20 @@
 const mongoose = require('mongoose');
 
 const BookingSchema = new mongoose.Schema({
+    // Ye fields existing schema mein add karo
+cancelReason: { type: String, default: "" },
+cancelledBy: { type: String, enum: ['user', 'worker', ''], default: '' },
+nearbyNotified: { type: Boolean, default: false },
+vehicleType: { type: String, default: "motorcycle" },
+subService: { type: String, default: "" },
+chatMessages: [
+  {
+    senderId: String,
+    senderRole: { type: String, enum: ['user', 'worker'] },
+    message: String,
+    timestamp: { type: Date, default: Date.now }
+  }
+],
     user: { 
         type: mongoose.Schema.Types.ObjectId, 
         ref: 'User', 
@@ -62,5 +76,6 @@ const BookingSchema = new mongoose.Schema({
         default: Date.now 
     }
 });
+
 
 module.exports = mongoose.model('Booking', BookingSchema);

@@ -208,4 +208,74 @@ router.get('/worker-withdrawals/:workerId', async (req, res) => {
     }
 });
 
+const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+
+// Cloudinary config — .env mein add karo:
+// CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: { folder: 'sws_profiles', allowed_formats: ['jpg', 'jpeg', 'png'] },
+});
+const upload = multer({ storage });
+
+// ✅ Upload Worker Profile Photo
+router.post('/upload-profile/:userId/:role', upload.single('photo'), async (req, res) => {
+  try {
+    const { userId, role } = req.params;
+    const imageUrl = req.file.path;
+    if (role === 'worker') {
+      await Worker.findByIdAndUpdate(userId, { profileImage: imageUrl });
+    } else {
+      await User.findByIdAndUpdate(userId, { profileImage: imageUrl });
+    }
+    res.json({ success: true, imageUrl });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ✅ Get User profile
+router.get('/user/:id', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select('-password');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Worker Verification — Admin approve kare
+router.put('/verify-worker/:workerId', async (req, res) => {
+  try {
+    const worker = await Worker.findByIdAndUpdate(
+      req.params.workerId,
+      { isVerified: true },
+      { new: true }
+    );
+    res.json({ success: true, worker });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Worker ID document upload
+router.post('/upload-id/:workerId', upload.single('idDoc'), async (req, res) => {
+  try {
+    const imageUrl = req.file.path;
+    await Worker.findByIdAndUpdate(req.params.workerId, { idDocumentUrl: imageUrl, isVerified: false });
+    res.json({ success: true, imageUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
