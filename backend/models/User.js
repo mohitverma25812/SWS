@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
+    resetOtp: { type: String },
+    resetOtpExpiry: { type: Date },
     profileImage: { type: String, default: "" },
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true },

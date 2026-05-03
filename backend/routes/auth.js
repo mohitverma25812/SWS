@@ -278,4 +278,61 @@ router.post('/upload-id/:workerId', upload.single('idDoc'), async (req, res) => 
   }
 });
 
+const crypto = require('crypto');
+
+// ✅ Forgot Password — OTP send karo (Simple version without email — OTP console mein aayega)
+// Production mein Nodemailer se email bhejo
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email, role } = req.body;
+    let user = role === 'worker'
+      ? await Worker.findOne({ email })
+      : await User.findOne({ email });
+
+    if (!user) return res.status(404).json({ success: false, message: "Ye email registered nahi hai!" });
+
+    // 6-digit OTP generate karo
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+
+    user.resetOtp = otp;
+    user.resetOtpExpiry = expiry;
+    await user.save();
+
+    // Production mein yahan email bhejo — abhi console mein dikhao
+    console.log(`🔑 Password Reset OTP for ${email}: ${otp}`);
+
+    // TODO: Nodemailer se email bhejo
+    // await sendEmail(email, 'Password Reset OTP', `Your OTP is: ${otp}`);
+
+    res.json({ success: true, message: "OTP bheja gaya! Email check karein.", otp }); // dev mein otp return karo
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ✅ Reset Password
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { email, otp, newPassword, role } = req.body;
+    let user = role === 'worker'
+      ? await Worker.findOne({ email })
+      : await User.findOne({ email });
+
+    if (!user) return res.status(404).json({ success: false, message: "User nahi mila!" });
+    if (user.resetOtp !== otp) return res.status(400).json({ success: false, message: "Galat OTP!" });
+    if (new Date() > user.resetOtpExpiry) return res.status(400).json({ success: false, message: "OTP expire ho gaya! Dobara try karo." });
+
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(newPassword, salt);
+    user.resetOtp = undefined;
+    user.resetOtpExpiry = undefined;
+    await user.save();
+
+    res.json({ success: true, message: "Password successfully change ho gaya!" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

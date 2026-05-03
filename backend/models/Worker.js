@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 
 const workerSchema = new mongoose.Schema({
+    resetOtp: { type: String },
+    resetOtpExpiry: { type: Date },
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },

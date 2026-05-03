@@ -7,7 +7,8 @@ const crypto = require('crypto'); // OTP ke liye
 // 1. CREATE BOOKING (Broadcasting & Broadcast Model Integrated)
 router.post('/create', async (req, res) => {
     try {
-        let { user, worker, location, price, latitude, longitude, serviceType } = req.body;
+        // 🔄 REPLACE LINE 12: Added 'tip' in destructuring
+        let { user, worker, location, price, latitude, longitude, serviceType, tip } = req.body;
 
         if (!user) {
             return res.status(400).json({ message: "User ID zaroori hai" });
@@ -22,11 +23,14 @@ router.post('/create', async (req, res) => {
 
         const generatedOtp = Math.floor(1000 + Math.random() * 9000).toString();
 
+        // 🔄 REPLACE LINES 26 TO 38: Added tip and totalAmount logic
         const newBooking = new Booking({
             user: user,      
             worker: worker || null, 
             location: location || "Live Location",
             price: price || 199,      
+            tip: tip || 0,                           // ✅ Tip field added
+            totalAmount: (price || 199) + (tip || 0),  // ✅ Total calculation
             status: 'pending', 
             latitude: latitude,
             longitude: longitude,
@@ -44,6 +48,8 @@ router.post('/create', async (req, res) => {
                 bookingId: newBooking._id,
                 location: newBooking.location,
                 price: newBooking.price,
+                tip: newBooking.tip,               // ✅ Broadcast mein tip add kiya
+                total: newBooking.totalAmount,     // ✅ Broadcast mein total add kiya
                 userName: "Customer", 
                 serviceType: serviceType,
                 latitude: latitude,
@@ -63,6 +69,7 @@ router.post('/create', async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 });
+
 
 // ✅ Correct Route for Acceptance
 router.post('/accept-booking', async (req, res) => {
